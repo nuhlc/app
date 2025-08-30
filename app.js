@@ -189,12 +189,45 @@
       catch(e){ rest.push(it); }
     }
     setFila(rest);
-    if (fila.length && !rest.length) mostrarMensagem("Registros pendentes enviados com sucesso.", false);
+    if (fila.length && !rest.length) mostrarMensagem("Registros pendentes enviados com sucesso!", false);
   }
 
   function salvaOffline(r){
     const f=getFila(); f.push(r); setFila(f);
   }
+
+  /* ========== DIAGNÓSTICO: escreve no statusBar e testa ambiente ========== */
+  function runDiagnostics(){
+    const statusBar = document.getElementById('statusBar');
+    if (!statusBar) return; // só roda se a UI do verso existir
+
+    function say(s){ statusBar.textContent = s; }
+
+    const checks = [];
+    checks.push(`HTTPS:${location.protocol === 'https:'}`);
+    checks.push(`html5-qrcode:${!!window.Html5Qrcode}`);
+    checks.push(`QRCode:${!!window.QRCode}`);
+    checks.push(`JsBarcode:${!!window.JsBarcode}`);
+    checks.push(`SW:${'serviceWorker' in navigator}`);
+    checks.push(`Top-level:${window.top === window.self}`);
+
+    say(checks.join(' | '));
+
+    // Conta câmeras disponíveis
+    if (navigator.mediaDevices?.enumerateDevices) {
+      navigator.mediaDevices.enumerateDevices()
+        .then(list => {
+          const cams = list.filter(d => d.kind === 'videoinput').length;
+          say(statusBar.textContent + ` | Câmeras:${cams}`);
+        })
+        .catch(e => {
+          say(statusBar.textContent + ' | enumerateDevices ERRO');
+          console.warn('enumerateDevices error', e);
+        });
+    }
+  }
+  // expõe se quiser chamar manualmente pelo console
+  window.runDiagnostics = runDiagnostics;
 
   // ======== Inicialização / Listeners ========
   document.addEventListener('DOMContentLoaded', () => {
@@ -238,6 +271,8 @@
         if (nomeInput)   nomeInput.value   = currentData.name||'';
         if (codigoInput) codigoInput.value = currentData.code||'';
         showBack(); startQR();
+        // roda diagnóstico quando o usuário abre o verso
+        runDiagnostics();
       });
     }
     if (flipToFront){
@@ -309,9 +344,11 @@
 
     // Tenta sincronizar ao abrir
     tentarEnviarFila();
-  })();
+
+    // também roda diagnóstico logo após carregar a página
+    runDiagnostics();
+  });
 
   // Exponha downloads se os botões usarem onclick no HTML
   // (já fizemos: window.downloadCard = downloadCard)
-
 })();
