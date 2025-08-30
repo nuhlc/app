@@ -152,6 +152,8 @@
 
     .top-actions{ display:flex; gap:8px; justify-content:center; margin-top:10px; flex-wrap:wrap; }
     .btn-outline{ background:#fff; color:#111; border:1px solid #ccc; }
+    .btn-danger { border:1px solid #b00020; color:#b00020; }
+    .btn-danger:hover { background:#b00020; color:#fff; }
 
     @media (max-width:720px){ :root{ --preview-scale:.60; } }
     @media (max-width:480px){ :root{ --preview-scale:.54; } }
@@ -231,8 +233,7 @@
       <div class="top-actions">
         <button class="btn-outline" id="flipToBack">Registrar Presença</button>
         <button class="btn-outline" id="flipToFront" style="display:none">Voltar ao crachá</button>
-        <button onclick="downloadCard('png')">Baixar (PNG)</button>
-        <button onclick="downloadCard('pdf')">Baixar (PDF)</button>
+        <button class="btn-outline btn-danger" id="resetApp">Reiniciar app (limpar cache)</button>
       </div>
     </div>
   </div>
@@ -436,6 +437,47 @@
     }
     function mostrarMensagem(t,err){ msg.textContent=t; msg.classList.toggle('error',!!err); }
 
+    // ===== Botão: Reiniciar app (limpar cache / SW / fila) =====
+    async function resetAppData() {
+      try { await stopQR(); } catch {}
+      try { localStorage.removeItem('filaRegistros'); } catch {}
+
+      try {
+        if (window.caches && caches.keys) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        }
+      } catch {}
+
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const reg of regs) { try { await reg.unregister(); } catch {} }
+        }
+      } catch {}
+
+      try {
+        if (window.indexedDB && typeof indexedDB.databases === 'function') {
+          const dbs = await indexedDB.databases();
+          await Promise.all((dbs || []).map(db => {
+            if (!db || !db.name) return Promise.resolve();
+            return new Promise(resolve => {
+              const req = indexedDB.deleteDatabase(db.name);
+              req.onsuccess = req.onerror = req.onblocked = () => resolve();
+            });
+          }));
+        }
+      } catch {}
+
+      location.reload();
+    }
+
+    function handleResetClick(){
+      const msg = "Isto vai limpar a fila offline, caches e Service Workers e recarregar o app.\nSe você estiver OFFLINE, o app pode não abrir até ter internet.\n\nDeseja continuar?";
+      if (!confirm(msg)) return;
+      resetAppData();
+    }
+
     // SW (para offline)
     if('serviceWorker' in navigator){
       window.addEventListener('load', ()=> navigator.serviceWorker.register('./sw.js').catch(()=>{}));
@@ -443,6 +485,10 @@
 
     // tenta sincronizar ao abrir
     tentarEnviarFila();
+
+    // Listener do botão reset
+    const resetBtn = document.getElementById('resetApp');
+    if (resetBtn) resetBtn.addEventListener('click', handleResetClick);
   </script>
 </body>
 </html>
