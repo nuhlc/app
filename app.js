@@ -83,6 +83,16 @@
       img.crossOrigin='anonymous';
       img.src = currentData.photoUrl || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjMwMCI+PC9zdmc+';
     }
+
+    // Persistir identidade (para reabrir offline / PWA instalado)
+    try {
+      localStorage.setItem('badgeIdentity', JSON.stringify({
+        name: currentData.name,
+        code: currentData.code,
+        photo: currentData.photoUrl
+      }));
+    } catch {}
+
     renderAll();
   }
   // Disponibiliza para integrações externas
@@ -196,7 +206,7 @@
     const f=getFila(); f.push(r); setFila(f);
   }
 
-  /* ========== DIAGNÓSTICO: escreve no statusBar e testa ambiente ========== */
+  /* ========== DIAGNÓSTICO ========== */
   function runDiagnostics(){
     const statusBar = document.getElementById('statusBar');
     if (!statusBar) return; // só roda se a UI do verso existir
@@ -213,30 +223,25 @@
 
     say(checks.join(' | '));
 
-    // Conta câmeras disponíveis
     if (navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function') {
       navigator.mediaDevices.enumerateDevices()
         .then(list => {
           const cams = list.filter(d => d.kind === 'videoinput').length;
           say(statusBar.textContent + ` | Câmeras:${cams}`);
         })
-        .catch(e => {
+        .catch(() => {
           say(statusBar.textContent + ' | enumerateDevices ERRO');
-          // console.warn('enumerateDevices error', e);
         });
     }
   }
-  // expõe se quiser chamar manualmente pelo console
   window.runDiagnostics = runDiagnostics;
 
   // ======== Reset geral (limpar caches, SW, fila) ========
   async function resetAppData() {
     try { await stopQR(); } catch {}
 
-    // limpa fila offline específica
     try { localStorage.removeItem('filaRegistros'); } catch {}
 
-    // apaga todos os caches
     try {
       if (window.caches && caches.keys) {
         const keys = await caches.keys();
@@ -244,7 +249,6 @@
       }
     } catch {}
 
-    // desregistra todos os service workers desta origem
     try {
       if ('serviceWorker' in navigator) {
         const regs = await navigator.serviceWorker.getRegistrations();
@@ -254,7 +258,6 @@
       }
     } catch {}
 
-    // tenta remover bancos IndexedDB (quando suportado)
     try {
       if (window.indexedDB && typeof indexedDB.databases === 'function') {
         const dbs = await indexedDB.databases();
@@ -268,7 +271,6 @@
       }
     } catch {}
 
-    // recarrega (se offline, pode abrir "em branco" até voltar a internet)
     location.reload();
   }
 
@@ -278,24 +280,41 @@
     await resetAppData();
   }
 
+  // ======== Receber dados via postMessage (Wix/iframe) ========
+  window.addEventListener('message', (event) => {
+    const d = event.data || {};
+    if (d.type === 'badgeData') {
+      setBadgeData(d.name, d.code, d.photoUrl);
+    }
+    // (Se tiver outra tela/lista que processe presenceQuery, trate aqui também)
+  });
+
   // ======== Inicialização / Listeners ========
   document.addEventListener('DOMContentLoaded', () => {
-    // Fallback visual se não houver 3D
     if (!supports3D) document.body.classList.add('no-3d');
 
-    // Opcional: imagens base64 na frente
     const bgEl = document.getElementById('bg');
     if (bgEl && BG_BASE64.startsWith('data:')) bgEl.style.backgroundImage = `url('${BG_BASE64}')`;
     if (LOGO_MAIN_BASE64)   { const el = document.getElementById('logoMain'); if (el) el.src = LOGO_MAIN_BASE64; }
     if (LOGO_FOOTER1_BASE64){ const el = document.getElementById('foot1');    if (el) el.src = LOGO_FOOTER1_BASE64; }
     if (LOGO_FOOTER2_BASE64){ const el = document.getElementById('foot2');    if (el) el.src = LOGO_FOOTER2_BASE64; }
 
-    // Render inicial da frente
     renderAll();
 
-    // Prefill por URL (o navegador já decodifica)
-    const p=new URLSearchParams(location.search);
-    setBadgeData(p.get('name')||'', p.get('code')||'', p.get('photo')||'');
+    // Prefill por URL (com aliases) OU fallback do localStorage
+    const p = new URLSearchParams(location.search);
+    const saved = (() => { try { return JSON.parse(localStorage.getItem('badgeIdentity')||'{}'); } catch { return {}; } })();
+
+    const name  = p.get('name')     || p.get('nome')     || saved.name  || '';
+    const code  = p.get('code')     || p.get('memberid') || p.get('memberId') || saved.code  || '';
+    const photo = p.get('photo')    || saved.photo || '';
+
+    setBadgeData(name, code, photo);
+
+    // Se veio algo pela URL nesta visita, garante persistência (backup)
+    if (p.has('name') || p.has('nome') || p.has('code') || p.has('memberid') || p.has('memberId') || p.has('photo')) {
+      try { localStorage.setItem('badgeIdentity', JSON.stringify({ name, code, photo })); } catch {}
+    }
 
     // Botões de flip
     const card3d      = document.getElementById('card3d');
@@ -325,6 +344,18 @@
     }
     if (flipToFront){
       flipToFront.addEventListener('click', ()=>{ showFront(); stopQR(); });
+    }
+
+    // Abrir já no verso via ?open=back
+    const shouldOpenBack = (p.get('open') || '').toLowerCase() === 'back';
+    if (shouldOpenBack) {
+      const nomeInput   = document.getElementById('nome');
+      const codigoInput = document.getElementById('codigo');
+      if (nomeInput)   nomeInput.value   = currentData.name||'';
+      if (codigoInput) codigoInput.value = currentData.code||'';
+      showBack();
+      startQR();
+      runDiagnostics();
     }
 
     // Travar o campo "evento" (somente leitura real)
@@ -411,21 +442,17 @@
       try {
         const reg = await navigator.serviceWorker.register('./sw.js');
 
-        // Quando o SW novo é encontrado
         reg.addEventListener('updatefound', () => {
           const newWorker = reg.installing;
           if (!newWorker) return;
 
           newWorker.addEventListener('statechange', () => {
-            // Quando o novo SW terminou de instalar e já existe um SW controlando a página
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              // Pede para o novo SW assumir imediatamente
               newWorker.postMessage({ type: 'SKIP_WAITING' });
             }
           });
         });
 
-        // Quando o novo SW assume o controle, recarrega UMA vez
         navigator.serviceWorker.addEventListener('controllerchange', () => {
           if (hasRefreshed) return;
           hasRefreshed = true;
