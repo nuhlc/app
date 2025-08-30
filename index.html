@@ -340,10 +340,18 @@
     }
     document.addEventListener('DOMContentLoaded',bootstrap);
 
-    // Prefill por URL ?name=...&code=...&photo=...
+    /* ========= Prefill por URL =========
+       Aceita:
+       ?name=...&code=...&photo=...
+       ?name=...&memberid=...&photo=...
+       ?name=...&memberId=...&photo=...
+    */
     (function(){
-      const p=new URLSearchParams(location.search);
-      setBadgeData(p.get('name')||'', p.get('code')||'', p.get('photo')||'');
+      const p   = new URLSearchParams(location.search);
+      const name  = p.get('name') || '';
+      const code  = p.get('code') || p.get('memberid') || p.get('memberId') || '';
+      const photo = p.get('photo') || '';
+      setBadgeData(name, code, photo);
     })();
 
     /* ========= Responsividade: ajusta --preview-scale conforme o espaço ========= */
