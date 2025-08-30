@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Crachá Digital — Frente/Verso (offline + câmera)</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="./manifest.webmanifest">
+  <meta name="theme-color" content="#111111">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Crachá">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700&family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+
+  <!-- LIBS LOCAIS (para offline) -->
+  <script src="./vendor/html5-qrcode.min.js" defer></script>
+  <script src="./vendor/qrcode.min.js" defer></script>
+  <script src="./vendor/html2canvas.min.js" defer></script>
+  <script src="./vendor/jspdf.umd.min.js" defer></script>
+  <script src="./vendor/JsBarcode.all.min.js" defer></script>
+
+  <style>
+    /* ====== VARS ====== */
+    :root { 
+      --preview-scale: 1; /* tamanho real; mude para 0.6 se quiser visualizar menor */
+      --primary:#1e88e5; --bg:#f9f9f9; --text:#333; --border:#ddd;
+      --danger:#b00020; --success:#2e7d32; --muted:#9aa0a6;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      font-family:'Montserrat',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      background:#E8E6E6; margin:0; padding:16px; color:#111;
+      -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+    }
+    .wrap{ max-width:1100px; margin:0 auto; }
+    .controls{ display:flex; gap:8px; justify-content:center; margin:10px 0 12px; flex-wrap:wrap; }
+    button{ padding:10px 14px; border:none; border-radius:10px; background:#111; color:#fff; cursor:pointer; }
+    button:hover{ opacity:.92; }
+
+    .preview-card{ background:transparent; border-radius:12px; padding:10px; box-shadow:none; max-width:min(100%, 638px); margin:0 auto; }
+    .preview-wrap{
+      --card-w:638px; --card-h:1011px;
+      width:var(--card-w);
+      height:var(--card-h);
+      overflow:hidden; border-radius:16px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.06);
+      margin:0 auto; position:relative; 
+      background:rgba(0,0,0,0.03);
+      /* Para reduzir visualmente sem 3D, descomente a seguir:
+      transform: scale(var(--preview-scale));
+      transform-origin: top left;
+      */
+    }
+
+    /* ====== CONTÊINER PLANO (sem 3D) ====== */
+    .card-3d{
+      position:absolute; left:0; top:0;
+      width:var(--card-w); height:var(--card-h);
+      transform: none !important;
+      transition: none !important;
+    }
+
+    /* Faces planas ocupando toda a área; sem rotação/backface */
+    .card, .back{
+      position:absolute; inset:0;
+      transform:none !important;
+      border-radius:28px;
+    }
+
+    /* Frente (visível por padrão) */
+    .card{
+      opacity:1; z-index:2;
+      background-color:#333333;
+      background-size:cover; background-position:center; background-repeat:no-repeat;
+      color:#fff; padding:14px 14px 12px;
+      display:grid; grid-template-rows:auto auto 1fr auto; row-gap:0; isolation:isolate; overflow:hidden;
+      box-shadow:0 4px 12px rgba(0,0,0,.15);
+    }
+
+    /* Verso (inicialmente oculto) */
+    .back{
+      opacity:1; z-index:1;
+      background-color:#333333;
+      background-size:cover; background-position:center; background-repeat:no-repeat;
+      color:#fff; padding:14px 14px 12px;
+      display:none; /* chave para alternar via .is-back */
+      isolation:isolate; overflow:hidden;
+      box-shadow:0 4px 12px rgba(0,0,0,.15);
+    }
+
+    /* Estado quando o verso está ativo: troca display/visibilidade */
+    .card-3d.is-back .card{ 
+      display:none !important; 
+      pointer-events:none !important; 
+      visibility:hidden !important; 
+      z-index:1 !important;
+    }
+    .card-3d.is-back .back{ 
+      display:grid !important; 
+      visibility:visible !important; 
+      z-index:2 !important;
+    }
+
+    .bg-layer{ position:absolute; inset:0; background-size:cover; background-position:center; background-repeat:no-repeat; opacity:1; z-index:1; border-radius:28px; }
+    .brand-row{ z-index:2; display:flex; justify-content:center; align-items:center; padding-top:2px; }
+    .logo-main{ max-height:250px; width:auto; height:auto; display:block; filter:brightness(1.05); }
+    .profile-block{ z-index:2; display:grid; justify-items:center; align-items:start; row-gap:0; margin-top:6px; margin-bottom:0; }
+    .photo{ z-index:2; width:40%; aspect-ratio:1/1; border-radius:250px; object-fit:cover; border:4px solid rgba(255,255,255,.85); background:rgba(255,255,255,.15); display:block; margin:0; justify-self:center; }
+    .info{ z-index:2; display:grid; gap:0; align-content:start; justify-items:center; text-align:center; padding:0; margin:0; }
+    .name{ font-size:36px; font-weight:700; margin:8px 0 0; line-height:1.05; text-shadow:0 1px 4px rgba(0,0,0,.35); }
+    .code{ font-size:8px; margin:0; line-height:1.3; opacity:.85; text-shadow:0 1px 2px rgba(0,0,0,.25); }
+    .qr-section{ z-index:2; display:grid; place-items:center; padding:8px 0; margin-bottom:40px; margin-top:-24px; }
+    .qr{ width:225px; height:225px; background:#fff; border-radius:12px; padding:10px; display:grid; place-items:center; }
+    .footer-row{ z-index:2; display:flex; align-items:center; justify-content:center; gap:10px; padding:8px 10px; margin-bottom:50px; position:relative; background:rgba(51,51,51,0.00); border-radius:12px; }
+    .foot-logo{ max-height:60px; }
+    .footer-text{ font-size:12px; color:#fff; line-height:1.3; text-align:justify; max-width:350px; text-shadow:0 1px 3px rgba(0,0,0,.35); }
+    .protocol{ position:absolute; bottom:-30px; left:50%; transform:translateX(-50%); font-size:10px; text-shadow:0 1px 2px rgba(0,0,0,.35); background:rgb(150,29,19,0.85); color:#fff; padding:4px 10px; border-radius:6px; }
+    .barcode-rail{ position:absolute; right:10px; top:5%; transform: translateY(-50%); z-index:2; pointer-events:none; }
+    .barcode-rot{ display:inline-block; transform: rotate(-90deg); transform-origin: right center; }
+
+    /* Painel branco do verso */
+    .badge-panel{
+      width:92%; max-width:600px; background:#fff; border-radius:12px;
+      box-shadow:0 4px 10px rgba(0,0,0,0.05); padding:20px;
+      display:grid; grid-template-rows:auto auto auto 1fr; gap:12px;
+      place-self:center; color:var(--text); font-family:'Inter',sans-serif;
+    }
+    .badge-logo{ text-align:center; }
+    .badge-logo img{ max-width:80%; height:auto; }
+    .badge-title{ text-align:center; color:#333; margin:0 0 8px; }
+    .badge-status{ font-size:13px; color:var(--muted); text-align:center; min-height:18px; }
+    .badge-reader{ width:100%; margin-top:8px; }
+    #reader{ width:100%; margin:16px auto 0; min-height:240px; border-radius:12px; border:1px dashed #cbd5e1; background:#f1f5f9; }
+
+    .badge-form{ margin-top:8px; }
+    .badge-form label{ font-size:13px; color:#555; }
+    .badge-form input, .badge-form button{
+      width:100%; padding:12px; margin-top:8px; border-radius:8px; border:1px solid var(--border); font-size:14px; background:#fff;
+    }
+    .badge-form input[readonly]{ background:#f7f7f7; color:#555; cursor:not-allowed; }
+    .badge-form button{ background:#A40000; color:#fff; font-weight:600; cursor:pointer; transition:background .2s; }
+    .badge-form button:hover{ background:#7a0000; }
+    .badge-msg{ margin-top:10px; font-weight:600; color:#6b7280; min-height:20px; text-align:center; }
+    .badge-msg.error{ color:var(--danger); }
+    .hint{ font-size:12px; color:#6b7280; margin-top:6px; }
+
+    .top-actions{ display:flex; gap:8px; justify-content:center; margin-top:10px; flex-wrap:wrap; }
+    .btn-outline{ background:#fff; color:#111; border:1px solid #ccc; }
+
+    @media (max-width:720px){
+      :root{ --preview-scale:.72; }
+      .preview-card{ max-width:100%; }
+      /* Se usar a escala 2D, descomente o transform da .preview-wrap lá em cima */
+    }
+    @media (max-width:480px){
+      :root{ --preview-scale:.62; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="preview-card">
+      <div class="preview-wrap" style="--card-w:638px; --card-h:1011px">
+        <div class="card-3d" id="card3d">
+
+          <!-- FRENTE -->
+          <div class="card" id="cardFront">
+            <div class="bg-layer" id="bg"></div>
+
+            <div class="brand-row"><img class="logo-main" id="logoMain" alt="Logo principal"></div>
+
+            <div class="profile-block">
+              <img class="photo" id="pPhoto" alt="Foto">
+              <div class="info">
+                <h3 class="name" id="pName">Nome</h3>
+                <p class="code" id="pCode">Código</p>
+              </div>
+            </div>
+
+            <div class="qr-section"><div class="qr" id="qr"></div></div>
+
+            <div class="barcode-rail"><div class="barcode-rot"><svg id="barcode"></svg></div></div>
+
+            <div class="footer-row">
+              <img class="foot-logo" id="foot1" alt="Logo 1">
+              <img class="foot-logo" id="foot2" alt="Logo 2">
+              <div class="footer-text" id="footText">Crachá digital pessoal e intransferível, válido somente para este evento.</div>
+              <div class="protocol" id="protocolText"></div>
+            </div>
+          </div>
+
+          <!-- VERSO -->
+          <div class="back" id="cardBack">
+            <div class="badge-panel">
+              <div class="badge-logo"><img src="./logo-evento.png" alt="Logo do Evento" onerror="this.style.display='none'"></div>
+
+              <h2 class="badge-title">Registro Digital de Presença</h2>
+              <div class="badge-status" id="statusBar"></div>
+
+              <div class="badge-reader"><div id="reader"></div></div>
+
+              <form id="form" class="badge-form" autocomplete="off">
+                <label for="nome">Nome</label>
+                <input type="text" id="nome" name="nome" placeholder="Nome" required readonly>
+
+                <label for="codigo">Código (memberId)</label>
+                <input type="text" id="codigo" name="codigo" placeholder="Código (memberId)" required readonly>
+
+                <label for="evento">Evento (QR)</label>
+                <input type="text" id="evento" name="evento" placeholder="Aproxime o QR do evento" required readonly inputmode="none">
+                <div class="hint">O evento só é preenchido ao ler o QR Code do evento.</div>
+
+                <button type="submit" id="enviarBtn">Enviar registro digital de presença</button>
+              </form>
+
+              <p id="msg" class="badge-msg"></p>
+
+              <div id="lista-registros" style="display:none">
+                <h3>Presenças Registradas</h3>
+                <table>
+                  <thead><tr><th>Data/Hora</th><th>Nome</th><th>Código</th><th>Evento</th></tr></thead>
+                  <tbody id="tabela-registros"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="top-actions">
+        <button class="btn-outline" id="flipToBack">Registrar Presença</button>
+        <button class="btn-outline" id="flipToFront" style="display:none">Voltar ao crachá</button>
+      </div>
+    </div>
+  </div>
+
+  <audio id="bip" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+
+  <script>
+    /* ========= CONFIG ========= */
+    const ENDPOINT = "https://script.google.com/macros/s/AKfycbwHk6o909wUncUcY0g0nRgJSpiZ-ZI7MtZjxMRCTrVU2yh9zm_M9uULA6SBYnTcuL0mEw/exec";
+    const CARD_WIDTH=638, CARD_HEIGHT=1011, QR_SIZE=200;
+
+    // Mantemos a detecção mas ela não influencia mais na visibilidade
+    const supports3D =
+      (typeof CSS !== 'undefined' && typeof CSS.supports === 'function' &&
+       CSS.supports('transform-style','preserve-3d')) ? true : false;
+    if (!supports3D) { document.body.classList.add('no-3d'); }
+
+    /* ========= Frente ========= */
+    const BG_BASE64=""; // opcional base64
+    const LOGO_MAIN_BASE64=""; const LOGO_FOOTER1_BASE64=""; const LOGO_FOOTER2_BASE64="";
+
+    function sanitizeForBarcode(s){return (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]/g,'');}
+    function getInitials(n){return n? n.trim().split(' ').filter(Boolean).map(p=>p[0].toUpperCase()).join(''):'';}
+    function makeProtocol(code,name){
+      const d=new Date(),p=n=>String(n).padStart(2,'0');
+      const ts=`${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}`;
+      const clean=sanitizeForBarcode(code), half=Math.floor(clean.length/2);
+      return `${ts}${clean.slice(0,half)}${getInitials(name)}${clean.slice(half)}`;
+    }
+
+    const currentData = { name:'', code:'', photoUrl:'' };
+
+    function safeRenderQR(){
+      if(!window.QRCode) return;
+      const cont=document.getElementById('qr'); if(!cont) return;
+      cont.innerHTML='';
+      new QRCode(cont,{text:JSON.stringify({nome:currentData.name||'Nome',codigo:currentData.code||''}),width:QR_SIZE,height:QR_SIZE});
+    }
+    function safeRenderBarcode(){
+      const protocol=makeProtocol(currentData.code||'', currentData.name||'Nome');
+      const protocolEl = document.getElementById('protocolText');
+      if (protocolEl) protocolEl.textContent = protocol;
+
+      if(window.JsBarcode){
+        const svg=document.getElementById('barcode');
+        if(svg){
+          while(svg.firstChild) svg.removeChild(svg.firstChild);
+          JsBarcode(svg,protocol,{format:"CODE128",lineColor:"#FFFFFF",background:"transparent",width:2,height:15,displayValue:false,margin:0});
+        }
+      }
+    }
+    function renderAll(){ safeRenderQR(); safeRenderBarcode(); }
+    function setBadgeData(name, code, photoUrl){
+      currentData.name = name||''; currentData.code = code||''; currentData.photoUrl = photoUrl||'';
+      document.getElementById('pName').textContent = currentData.name || 'Nome';
+      document.getElementById('pCode').textContent = currentData.code || 'Código';
+      const img=document.getElementById('pPhoto'); if (img){ img.crossOrigin='anonymous'; img.src = currentData.photoUrl || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjMwMCI+PC9zdmc+'; }
+      renderAll();
+    }
+
+    function bootstrap(){
+      if(BG_BASE64.startsWith('data:')) document.getElementById('bg').style.backgroundImage=`url('${BG_BASE64}')`;
+      if(LOGO_MAIN_BASE64)   document.getElementById('logoMain').src=LOGO_MAIN_BASE64;
+      if(LOGO_FOOTER1_BASE64)document.getElementById('foot1').src=LOGO_FOOTER1_BASE64;
+      if(LOGO_FOOTER2_BASE64)document.getElementById('foot2').src=LOGO_FOOTER2_BASE64;
+      renderAll();
+    }
+    document.addEventListener('DOMContentLoaded',bootstrap);
+
+    // Prefill por URL ?name=...&code=...&photo=...
+    (function(){
+      const p=new URLSearchParams(location.search);
+      setBadgeData(p.get('name')||'', p.get('code')||'', p.get('photo')||'');
+    })();
+
+    /* ========= Verso ========= */
+    const card3d      = document.getElementById('card3d');
+    const flipToBack  = document.getElementById('flipToBack');
+    const flipToFront = document.getElementById('flipToFront');
+
+    const form           = document.getElementById('form');
+    const nomeInput      = document.getElementById('nome');
+    const codigoInput    = document.getElementById('codigo');
+    const eventoInput    = document.getElementById('evento');
+    const statusBar      = document.getElementById('statusBar');
+    const msg            = document.getElementById('msg');
+    const registrosTabela= document.getElementById('tabela-registros');
+    const bip            = document.getElementById('bip');
+
+    let eventoValido=false, qrInstance=null;
+
+    function showBack(){
+      card3d.classList.add('is-back');
+      flipToFront.style.display='inline-block';
+    }
+    function showFront(){
+      card3d.classList.remove('is-back');
+      flipToFront.style.display='none';
+    }
+
+    flipToBack.addEventListener('click', ()=>{
+      nomeInput.value = currentData.name||''; codigoInput.value = currentData.code||'';
+      showBack(); startQR();
+    });
+    flipToFront.addEventListener('click', ()=>{ showFront(); stopQR(); });
+
+    // trava o campo "evento"
+    ['keydown','keypress','keyup','paste','drop','input','focus'].forEach(evt=>{
+      eventoInput.addEventListener(evt,e=>{
+        if(evt!=='focus') e.preventDefault();
+        if(evt==='focus') eventoInput.blur();
+        return false;
+      },true);
+    });
+
+    function setStatusOfflineUI(){
+      statusBar.textContent = navigator.onLine ? "" : "Sem conexão — os registros serão enviados automaticamente quando a internet voltar.";
+    }
+    window.addEventListener('online', ()=>{ setStatusOfflineUI(); tentarEnviarFila(); });
+    window.addEventListener('offline', setStatusOfflineUI);
+    setStatusOfflineUI();
+
+    function mostrarMensagem(t,err){ msg.textContent=t; msg.classList.toggle('error',!!err); }
+
+    function onScanSuccess(decodedText){
+      try{
+        const data=JSON.parse(decodedText);
+        if(data && data.nome && data.codigo){
+          eventoInput.value=`${data.nome} - ${data.codigo}`; eventoValido=true; bip.play();
+          mostrarMensagem("Evento lido com sucesso!", false);
+        }else{ mostrarMensagem('QR inválido. Esperado {"nome":"...","codigo":"..."}', true); }
+      }catch(e){ mostrarMensagem("Leitura inválida do QR.", true); }
+    }
+
+    async function startQR(){
+      try{
+        if(!window.Html5Qrcode){ console.warn('html5-qrcode ainda não carregado (faça uma visita online para cachear).'); return; }
+        if(qrInstance) return;
+        qrInstance=new Html5Qrcode("reader");
+        await qrInstance.start({ facingMode:"environment" }, { fps:10, qrbox:250 }, onScanSuccess);
+      }catch(e){ console.warn("Falha ao iniciar câmera:", e); }
+    }
+    async function stopQR(){
+      try {
+        if(qrInstance){
+          await qrInstance.stop();
+          await qrInstance.clear();
+          qrInstance=null;
+        }
+      } catch (e) {}
+    }
+
+    // fila offline
+    function getFila(){
+      try{ return JSON.parse(localStorage.getItem('filaRegistros')||'[]'); }
+      catch(e){ return []; }
+    }
+    function setFila(a){ localStorage.setItem('filaRegistros', JSON.stringify(a)); }
+    async function enviarRegistro(r){
+      const fd=new URLSearchParams(); fd.append('nome',r.nome); fd.append('codigo',r.codigo); fd.append('evento',r.evento); fd.append('horario',r.horario);
+      const resp=await fetch(ENDPOINT,{method:'POST',body:fd}); if(!resp.ok) throw new Error('Falha no envio');
+    }
+    async function tentarEnviarFila(){
+      const fila=getFila(); if(!fila.length || !navigator.onLine) return;
+      const rest=[]; for(const it of fila){ try{ await enviarRegistro(it); }catch(e){ rest.push(it); } }
+      setFila(rest); if(fila.length && !rest.length) mostrarMensagem("Registros pendentes enviados com sucesso.", false);
+    }
+    function salvaOffline(r){ const f=getFila(); f.push(r); setFila(f); }
+
+    form.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      if(!eventoValido || !eventoInput.value.trim()){ mostrarMensagem("Leia o QR do evento para prosseguir.", true); return; }
+      const registro={ nome:nomeInput.value.trim(), codigo:codigoInput.value.trim(), evento:eventoInput.value.trim(), horario:new Date().toLocaleString('pt-BR') };
+      if(navigator.onLine){
+        try{ await enviarRegistro(registro); mostrarMensagem("Presença registrada com sucesso!", false); bip.play(); }
+        catch(e){ salvaOffline(registro); mostrarMensagem("Sem conexão estável. Registro salvo e será enviado automaticamente.", true); }
+      }else{
+        salvaOffline(registro); mostrarMensagem("Você está offline. Registro salvo e será enviado quando a internet voltar.", true);
+      }
+      eventoInput.value=""; eventoValido=false;
+    });
+
+    // SW (para offline)
+    if('serviceWorker' in navigator){
+      window.addEventListener('load', ()=> navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+    }
+    // tenta sincronizar ao abrir
+    (function(){ const fila=getFila(); if(fila && fila.length) tentarEnviarFila(); })();
+  </script>
+</body>
+</html>
