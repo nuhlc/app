@@ -229,6 +229,55 @@
   // expõe se quiser chamar manualmente pelo console
   window.runDiagnostics = runDiagnostics;
 
+  // ======== Reset geral (limpar caches, SW, fila) ========
+  async function resetAppData() {
+    try { await stopQR(); } catch {}
+
+    // limpa fila offline específica
+    try { localStorage.removeItem('filaRegistros'); } catch {}
+
+    // apaga todos os caches
+    try {
+      if (window.caches && caches.keys) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+    } catch {}
+
+    // desregistra todos os service workers desta origem
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const reg of regs) {
+          try { await reg.unregister(); } catch {}
+        }
+      }
+    } catch {}
+
+    // tenta remover bancos IndexedDB (quando suportado)
+    try {
+      if (window.indexedDB && typeof indexedDB.databases === 'function') {
+        const dbs = await indexedDB.databases();
+        await Promise.all((dbs || []).map(db => {
+          if (!db || !db.name) return Promise.resolve();
+          return new Promise(resolve => {
+            const req = indexedDB.deleteDatabase(db.name);
+            req.onsuccess = req.onerror = req.onblocked = () => resolve();
+          });
+        }));
+      }
+    } catch {}
+
+    // recarrega (se offline, pode abrir "em branco" até voltar a internet)
+    location.reload();
+  }
+
+  async function handleResetClick() {
+    const msg = "Isto vai limpar a fila offline, caches e Service Workers e recarregar o app.\nSe você estiver OFFLINE, o app pode não abrir até ter internet.\n\nDeseja continuar?";
+    if (!confirm(msg)) return;
+    await resetAppData();
+  }
+
   // ======== Inicialização / Listeners ========
   document.addEventListener('DOMContentLoaded', () => {
     // Fallback visual se não houver 3D
@@ -289,6 +338,10 @@
         },true);
       });
     }
+
+    // Botão de reset (limpa SW/caches/fila)
+    const resetBtn = document.getElementById('resetApp');
+    if (resetBtn) resetBtn.addEventListener('click', handleResetClick);
 
     // Status online/offline
     setStatusOfflineUI();
