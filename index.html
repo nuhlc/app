@@ -25,9 +25,8 @@
   <script src="./vendor/JsBarcode.all.min.js" defer></script>
 
   <style>
-    /* ====== VARS ====== */
-    :root { 
-      --preview-scale: 1; /* tamanho real; mude para 0.6 se quiser visualizar menor */
+    :root { --preview-scale: 0.38; }
+    :root {
       --primary:#1e88e5; --bg:#f9f9f9; --text:#333; --border:#ddd;
       --danger:#b00020; --success:#2e7d32; --muted:#9aa0a6;
     }
@@ -42,68 +41,71 @@
     button{ padding:10px 14px; border:none; border-radius:10px; background:#111; color:#fff; cursor:pointer; }
     button:hover{ opacity:.92; }
 
-    .preview-card{ background:transparent; border-radius:12px; padding:10px; box-shadow:none; max-width:min(100%, 638px); margin:0 auto; }
+    .preview-card{ background:transparent; border-radius:12px; padding:10px; box-shadow:none; max-width:min(100%, 460px); margin:0 auto; }
     .preview-wrap{
       --card-w:638px; --card-h:1011px;
-      width:var(--card-w);
-      height:var(--card-h);
+      width:calc(var(--card-w)*var(--preview-scale));
+      height:calc(var(--card-h)*var(--preview-scale));
       overflow:hidden; border-radius:16px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.06);
-      margin:0 auto; position:relative; 
+      margin:0 auto; position:relative; perspective:1200px;
       background:rgba(0,0,0,0.03);
-      /* Para reduzir visualmente sem 3D, descomente a seguir:
-      transform: scale(var(--preview-scale));
-      transform-origin: top left;
-      */
     }
 
-    /* ====== CONTÊINER PLANO (sem 3D) ====== */
+    /* contêiner 3D */
     .card-3d{
-      position:absolute; left:0; top:0;
-      width:var(--card-w); height:var(--card-h);
-      transform: none !important;
-      transition: none !important;
-    }
-
-    /* Faces planas ocupando toda a área; sem rotação/backface */
-    .card, .back{
       position:absolute; inset:0;
-      transform:none !important;
-      border-radius:28px;
+      transform-style:preserve-3d; -webkit-transform-style:preserve-3d;
     }
 
-    /* Frente (visível por padrão) */
+    /* Giramos as FACES, não o contêiner */
+    .card, .back{
+      width:var(--card-w); height:var(--card-h);
+      position:absolute; left:0; top:0;
+      transform-origin:top left;
+      backface-visibility:hidden; -webkit-backface-visibility:hidden;
+      will-change:transform, opacity;
+      transition: transform .7s cubic-bezier(.2,.7,.2,1), opacity .25s ease;
+    }
+
+    /* Estado inicial: FRENTE visível */
     .card{
+      transform:translateZ(0) scale(var(--preview-scale)) rotateY(0deg);
       opacity:1; z-index:2;
       background-color:#333333;
+      /* background-image:url(./bg-frente.jpg); */ /* opcional */
       background-size:cover; background-position:center; background-repeat:no-repeat;
-      color:#fff; padding:14px 14px 12px;
+      color:#fff; border-radius:28px; padding:14px 14px 12px;
       display:grid; grid-template-rows:auto auto 1fr auto; row-gap:0; isolation:isolate; overflow:hidden;
       box-shadow:0 4px 12px rgba(0,0,0,.15);
     }
+    /* Frente quando verso ativo */
+    .card-3d.is-back .card{
+      transform:translateZ(0) scale(var(--preview-scale)) rotateY(180deg);
+      opacity:0; z-index:1; pointer-events:none;
+    }
 
-    /* Verso (inicialmente oculto) */
+    /* VERSO (inicialmente invertido) */
     .back{
-      opacity:1; z-index:1;
+      transform:translateZ(0) scale(var(--preview-scale)) rotateY(180deg);
+      opacity:0; z-index:1;
       background-color:#333333;
+      /* background-image:url(./bg-verso.jpg); */ /* opcional */
       background-size:cover; background-position:center; background-repeat:no-repeat;
-      color:#fff; padding:14px 14px 12px;
-      display:none; /* chave para alternar via .is-back */
-      isolation:isolate; overflow:hidden;
+      color:#fff; border-radius:28px; padding:14px 14px 12px;
+      display:grid; grid-template-rows:1fr; isolation:isolate; overflow:hidden;
       box-shadow:0 4px 12px rgba(0,0,0,.15);
     }
+    /* Verso quando ativo */
+    .card-3d.is-back .back{
+      transform:translateZ(0) scale(var(--preview-scale)) rotateY(0deg);
+      opacity:1; z-index:2;
+    }
 
-    /* Estado quando o verso está ativo: troca display/visibilidade */
-    .card-3d.is-back .card{ 
-      display:none !important; 
-      pointer-events:none !important; 
-      visibility:hidden !important; 
-      z-index:1 !important;
-    }
-    .card-3d.is-back .back{ 
-      display:grid !important; 
-      visibility:visible !important; 
-      z-index:2 !important;
-    }
+    /* Fallback sem 3D */
+    .no-3d .card-3d .card{ display:block; opacity:1; }
+    .no-3d .card-3d .back{ display:none; opacity:0; }
+    .no-3d.back-visible .card-3d .card{ display:none; opacity:0; }
+    .no-3d.back-visible .card-3d .back{ display:grid; opacity:1; transform:scale(var(--preview-scale)); }
 
     .bg-layer{ position:absolute; inset:0; background-size:cover; background-position:center; background-repeat:no-repeat; opacity:1; z-index:1; border-radius:28px; }
     .brand-row{ z-index:2; display:flex; justify-content:center; align-items:center; padding-top:2px; }
@@ -151,14 +153,8 @@
     .top-actions{ display:flex; gap:8px; justify-content:center; margin-top:10px; flex-wrap:wrap; }
     .btn-outline{ background:#fff; color:#111; border:1px solid #ccc; }
 
-    @media (max-width:720px){
-      :root{ --preview-scale:.72; }
-      .preview-card{ max-width:100%; }
-      /* Se usar a escala 2D, descomente o transform da .preview-wrap lá em cima */
-    }
-    @media (max-width:480px){
-      :root{ --preview-scale:.62; }
-    }
+    @media (max-width:720px){ :root{ --preview-scale:.60; } }
+    @media (max-width:480px){ :root{ --preview-scale:.54; } }
   </style>
 </head>
 <body>
@@ -235,6 +231,8 @@
       <div class="top-actions">
         <button class="btn-outline" id="flipToBack">Registrar Presença</button>
         <button class="btn-outline" id="flipToFront" style="display:none">Voltar ao crachá</button>
+        <button onclick="downloadCard('png')">Baixar (PNG)</button>
+        <button onclick="downloadCard('pdf')">Baixar (PDF)</button>
       </div>
     </div>
   </div>
@@ -245,8 +243,9 @@
     /* ========= CONFIG ========= */
     const ENDPOINT = "https://script.google.com/macros/s/AKfycbwHk6o909wUncUcY0g0nRgJSpiZ-ZI7MtZjxMRCTrVU2yh9zm_M9uULA6SBYnTcuL0mEw/exec";
     const CARD_WIDTH=638, CARD_HEIGHT=1011, QR_SIZE=200;
+    const px2mm = p => p * 0.264583;
 
-    // Mantemos a detecção mas ela não influencia mais na visibilidade
+    // Detecta 3D de forma segura
     const supports3D =
       (typeof CSS !== 'undefined' && typeof CSS.supports === 'function' &&
        CSS.supports('transform-style','preserve-3d')) ? true : false;
@@ -295,6 +294,20 @@
       renderAll();
     }
 
+    async function downloadCard(type='png'){
+      if(!window.html2canvas){ alert('html2canvas não disponível offline até a primeira visita em HTTPS.'); return; }
+      renderAll();
+      const el=document.getElementById('cardFront'); if(!el) return;
+      const canvas=await html2canvas(el,{backgroundColor:null,scale:4,useCORS:true,allowTaint:true});
+      if(type==='png'){ const url=canvas.toDataURL('image/png'); triggerDownload(url,'cartao.png'); }
+      else{
+        if(!window.jspdf||!window.jspdf.jsPDF){ alert('jsPDF não disponível offline até a primeira visita em HTTPS.'); return; }
+        const {jsPDF}=window.jspdf; const pdf=new jsPDF({orientation:'portrait',unit:'mm',format:[px2mm(CARD_WIDTH),px2mm(CARD_HEIGHT)]});
+        pdf.addImage(canvas.toDataURL('image/jpeg',0.95),'JPEG',0,0,px2mm(CARD_WIDTH),px2mm(CARD_HEIGHT)); pdf.save('cartao.pdf');
+      }
+    }
+    function triggerDownload(u,f){ const a=document.createElement('a'); a.href=u; a.download=f; document.body.appendChild(a); a.click(); a.remove(); }
+
     function bootstrap(){
       if(BG_BASE64.startsWith('data:')) document.getElementById('bg').style.backgroundImage=`url('${BG_BASE64}')`;
       if(LOGO_MAIN_BASE64)   document.getElementById('logoMain').src=LOGO_MAIN_BASE64;
@@ -311,27 +324,29 @@
     })();
 
     /* ========= Verso ========= */
-    const card3d      = document.getElementById('card3d');
-    const flipToBack  = document.getElementById('flipToBack');
+    const card3d = document.getElementById('card3d');
+    const flipToBack = document.getElementById('flipToBack');
     const flipToFront = document.getElementById('flipToFront');
 
-    const form           = document.getElementById('form');
-    const nomeInput      = document.getElementById('nome');
-    const codigoInput    = document.getElementById('codigo');
-    const eventoInput    = document.getElementById('evento');
-    const statusBar      = document.getElementById('statusBar');
-    const msg            = document.getElementById('msg');
-    const registrosTabela= document.getElementById('tabela-registros');
-    const bip            = document.getElementById('bip');
+    const form = document.getElementById('form');
+    const nomeInput   = document.getElementById('nome');
+    const codigoInput = document.getElementById('codigo');
+    const eventoInput = document.getElementById('evento');
+    const statusBar   = document.getElementById('statusBar');
+    const msg         = document.getElementById('msg');
+    const registrosTabela = document.getElementById('tabela-registros');
+    const bip         = document.getElementById('bip');
 
     let eventoValido=false, qrInstance=null;
 
     function showBack(){
       card3d.classList.add('is-back');
+      if(!supports3D){ document.body.classList.add('back-visible'); }
       flipToFront.style.display='inline-block';
     }
     function showFront(){
       card3d.classList.remove('is-back');
+      if(!supports3D){ document.body.classList.remove('back-visible'); }
       flipToFront.style.display='none';
     }
 
@@ -356,8 +371,6 @@
     window.addEventListener('online', ()=>{ setStatusOfflineUI(); tentarEnviarFila(); });
     window.addEventListener('offline', setStatusOfflineUI);
     setStatusOfflineUI();
-
-    function mostrarMensagem(t,err){ msg.textContent=t; msg.classList.toggle('error',!!err); }
 
     function onScanSuccess(decodedText){
       try{
@@ -417,12 +430,19 @@
       eventoInput.value=""; eventoValido=false;
     });
 
+    function exibirNaTabela(r){
+      const tr=document.createElement('tr'); tr.innerHTML=`<td>${r.horario}</td><td>${r.nome}</td><td>${r.codigo}</td><td>${r.evento}</td>`;
+      registrosTabela.prepend(tr);
+    }
+    function mostrarMensagem(t,err){ msg.textContent=t; msg.classList.toggle('error',!!err); }
+
     // SW (para offline)
     if('serviceWorker' in navigator){
       window.addEventListener('load', ()=> navigator.serviceWorker.register('./sw.js').catch(()=>{}));
     }
+
     // tenta sincronizar ao abrir
-    (function(){ const fila=getFila(); if(fila && fila.length) tentarEnviarFila(); })();
+    tentarEnviarFila();
   </script>
 </body>
 </html>
