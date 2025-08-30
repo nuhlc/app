@@ -85,7 +85,7 @@
     }
     renderAll();
   }
-  // Deixe disponível global (integrações externas)
+  // Disponibiliza para integrações externas
   window.setBadgeData = setBadgeData;
 
   async function downloadCard(type='png'){
@@ -214,7 +214,7 @@
     say(checks.join(' | '));
 
     // Conta câmeras disponíveis
-    if (navigator.mediaDevices?.enumerateDevices) {
+    if (navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function') {
       navigator.mediaDevices.enumerateDevices()
         .then(list => {
           const cams = list.filter(d => d.kind === 'videoinput').length;
@@ -222,7 +222,7 @@
         })
         .catch(e => {
           say(statusBar.textContent + ' | enumerateDevices ERRO');
-          console.warn('enumerateDevices error', e);
+          // console.warn('enumerateDevices error', e);
         });
     }
   }
@@ -244,9 +244,9 @@
     // Render inicial da frente
     renderAll();
 
-    // Prefill por URL
+    // Prefill por URL (o navegador já decodifica)
     const p=new URLSearchParams(location.search);
-    setBadgeData(decodeURIComponent(p.get('name')||''), decodeURIComponent(p.get('code')||''), decodeURIComponent(p.get('photo')||''));
+    setBadgeData(p.get('name')||'', p.get('code')||'', p.get('photo')||'');
 
     // Botões de flip
     const card3d      = document.getElementById('card3d');
@@ -271,8 +271,7 @@
         if (nomeInput)   nomeInput.value   = currentData.name||'';
         if (codigoInput) codigoInput.value = currentData.code||'';
         showBack(); startQR();
-        // roda diagnóstico quando o usuário abre o verso
-        runDiagnostics();
+        runDiagnostics(); // diagnóstico ao abrir verso
       });
     }
     if (flipToFront){
@@ -281,21 +280,22 @@
 
     // Travar o campo "evento" (somente leitura real)
     const eventoInput = document.getElementById('evento');
-    ['keydown','keypress','keyup','paste','drop','input','focus'].forEach(evt=>{
-      if (!eventoInput) return;
-      eventoInput.addEventListener(evt,e=>{
-        if(evt!=='focus') e.preventDefault();
-        if(evt==='focus') eventoInput.blur();
-        return false;
-      },true);
-    });
+    if (eventoInput){
+      ['keydown','keypress','keyup','paste','drop','input','focus'].forEach(evt=>{
+        eventoInput.addEventListener(evt,e=>{
+          if(evt!=='focus') e.preventDefault();
+          if(evt==='focus') eventoInput.blur();
+          return false;
+        },true);
+      });
+    }
 
     // Status online/offline
     setStatusOfflineUI();
     window.addEventListener('online', ()=>{ setStatusOfflineUI(); tentarEnviarFila(); });
     window.addEventListener('offline', setStatusOfflineUI);
 
-    // Submit do formulário (verso)
+    // Envio do formulário (verso)
     const form = document.getElementById('form');
     if (form){
       form.addEventListener('submit', async (e)=>{
@@ -306,15 +306,19 @@
         const eventoInput = document.getElementById('evento');
         const bip         = document.getElementById('bip');
 
-        if(!eventoValido || !eventoInput || !eventoInput.value.trim()){
+        const nome   = nomeInput ? nomeInput.value.trim()   : '';
+        const codigo = codigoInput ? codigoInput.value.trim() : '';
+        const evento = eventoInput ? eventoInput.value.trim() : '';
+
+        if(!eventoValido || !evento){
           mostrarMensagem("Leia o QR do evento para prosseguir.", true);
           return;
         }
 
-        const registro={
-          nome:   (nomeInput?.value || '').trim(),
-          codigo: (codigoInput?.value || '').trim(),
-          evento: (eventoInput?.value || '').trim(),
+        const registro = {
+          nome,
+          codigo,
+          evento,
           horario: new Date().toLocaleString('pt-BR')
         };
 
@@ -337,18 +341,48 @@
       });
     }
 
-    // SW (para offline)
-    if('serviceWorker' in navigator){
-      window.addEventListener('load', ()=> navigator.serviceWorker.register('./sw.js').catch(()=>{}));
-    }
-
-    // Tenta sincronizar ao abrir
+    // Tenta sincronizar ao abrir e quando volta o foco
     tentarEnviarFila();
-
-    // também roda diagnóstico logo após carregar a página
-    runDiagnostics();
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) tentarEnviarFila();
+    });
   });
 
-  // Exponha downloads se os botões usarem onclick no HTML
-  // (já fizemos: window.downloadCard = downloadCard)
+  // ===== Service Worker: registro + auto-update =====
+  (() => {
+    if (!('serviceWorker' in navigator)) return;
+
+    let hasRefreshed = false;
+
+    window.addEventListener('load', async () => {
+      try {
+        const reg = await navigator.serviceWorker.register('./sw.js');
+
+        // Quando o SW novo é encontrado
+        reg.addEventListener('updatefound', () => {
+          const newWorker = reg.installing;
+          if (!newWorker) return;
+
+          newWorker.addEventListener('statechange', () => {
+            // Quando o novo SW terminou de instalar e já existe um SW controlando a página
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              // Pede para o novo SW assumir imediatamente
+              newWorker.postMessage({ type: 'SKIP_WAITING' });
+            }
+          });
+        });
+
+        // Quando o novo SW assume o controle, recarrega UMA vez
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (hasRefreshed) return;
+          hasRefreshed = true;
+          location.reload();
+        });
+
+      } catch (e) {
+        // opcional: console.warn('SW register error', e);
+      }
+    });
+  })();
+
 })();
