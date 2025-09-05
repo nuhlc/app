@@ -551,46 +551,52 @@
     }
     function mostrarMensagem(t,err){ msg.textContent=t; msg.classList.toggle('error',!!err); }
 
-    // ===== Botão: Reiniciar app (limpar cache / SW / fila) =====
     async function resetAppData() {
-      try { await stopQR(); } catch {}
-      try { localStorage.removeItem('filaRegistros'); } catch {}
+  try { await stopQR(); } catch {}
 
-      try {
-        if (window.caches && caches.keys) {
-          const keys = await caches.keys();
-          await Promise.all(keys.map(k => caches.delete(k)));
-        }
-      } catch {}
+  try { localStorage.removeItem('filaRegistros'); } catch {}
 
-      try {
-        if ('serviceWorker' in navigator) {
-          const regs = await navigator.serviceWorker.getRegistrations();
-          for (const reg of regs) { try { await reg.unregister(); } catch {} }
-        }
-      } catch {}
-
-      try {
-        if (window.indexedDB && typeof indexedDB.databases === 'function') {
-          const dbs = await indexedDB.databases();
-          await Promise.all((dbs || []).map(db => {
-            if (!db || !db.name) return Promise.resolve();
-            return new Promise(resolve => {
-              const req = indexedDB.deleteDatabase(db.name);
-              req.onsuccess = req.onerror = req.onblocked = () => resolve();
-            });
-          }));
-        }
-      } catch {}
-
-      location.reload();
+  // Limpar apenas o cache do PWA
+  const CACHE_NAME = 'cracha-presenca';
+  try {
+    if (window.caches && caches.keys) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => (k === CACHE_NAME ? caches.delete(k) : null)));
     }
+  } catch {}
 
-    function handleResetClick(){
-      const msg = "Isto vai limpar a fila offline, caches e Service Workers e recarregar o app.\nSe você estiver OFFLINE, o app pode não abrir até ter internet.\n\nDeseja continuar?";
-      if (!confirm(msg)) return;
-      resetAppData();
+  // Desregistrar apenas o service worker do PWA
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const reg of regs) {
+        if (reg.scope.includes(location.origin)) {
+          try { await reg.unregister(); } catch {}
+        }
+      }
     }
+  } catch {}
+
+  // Remover IndexedDB usado pelo app (se você tiver um nome específico, substitua aqui)
+  try {
+    if (window.indexedDB && typeof indexedDB.databases === 'function') {
+      const dbs = await indexedDB.databases();
+      await Promise.all((dbs || []).map(db => {
+        if (!db || !db.name) return Promise.resolve();
+        if (db.name.startsWith('cracha-')) { // apenas DBs do app
+          return new Promise(resolve => {
+            const req = indexedDB.deleteDatabase(db.name);
+            req.onsuccess = req.onerror = req.onblocked = () => resolve();
+          });
+        }
+        return Promise.resolve();
+      }));
+    }
+  } catch {}
+
+  // Recarrega e força o SW registrar novamente
+  location.reload();
+}
 
     // SW (para offline)
     if('serviceWorker' in navigator){
